@@ -14,7 +14,7 @@ int main()
 	}
 
 	imageFile.seekg (0, imageFile.end);
-	size_t length = imageFile.tellg();
+	ssize_t length = imageFile.tellg();
     imageFile.seekg (0, imageFile.beg);
     std::cout << "opened image file with " << length << " bytes" << std::endl;
 
@@ -33,6 +33,13 @@ int main()
 	if (!partitionExtractor)
 	{
 		std::cerr << "partition extraction failed due an error!" << std::endl;
+		return 1;
+	}
+
+	if (!partitionExtractor.writePartitions("prefix"))
+	{
+		std::cerr << "writing partitions failed!" << std::endl;
+		return 1;
 	}
 
 	delete[] rawFileBuffer;

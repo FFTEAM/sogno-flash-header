@@ -15,7 +15,6 @@ class SognoHeader
 	uint32_t mDataSize;
 	uint32_t mCrc32; // crc32 of payload
 	size_t mOffset;
-	uint32_t mBlockLen;
 
 	public:
 			SognoHeader(unsigned char*);
@@ -33,28 +32,36 @@ class SognoPartition
 	unsigned char* mRawPartitionPayload; // only payload
 	uint32_t mNextPartitionOffset;
 
+	SognoPartition(const SognoPartition&) = delete;
+	const SognoPartition& operator=(const SognoPartition&) = delete;
+
 	public:
-			SognoPartition(unsigned char*, size_t);
+			SognoPartition(unsigned char*, ssize_t);
 			~SognoPartition();
 
 			explicit operator bool() const;
 			uint32_t nextPartitionOffset() const;
+			bool writeData(const std::string&, size_t) const;
 };
 
 class SognoPartitionExtractor
 {
 	bool mIsValid;
-	size_t mFileSize;
+	ssize_t mFileSize;
 	unsigned char* mRawFileBuffer;
 
 	SognoHeader mMainHeader; // header of the whole image
 	std::vector<SognoPartition*> mPartition;
 
+	SognoPartitionExtractor(const SognoPartitionExtractor&) = delete;
+	const SognoPartitionExtractor& operator=(const SognoPartitionExtractor&) = delete;
+
 	public:
-			SognoPartitionExtractor(unsigned char*, size_t);
+			SognoPartitionExtractor(unsigned char*, ssize_t);
 			~SognoPartitionExtractor();
 
 			explicit operator bool() const;
+			bool writePartitions(const std::string&) const;
 };
 
 #endif

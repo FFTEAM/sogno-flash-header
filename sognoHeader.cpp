@@ -1,13 +1,15 @@
 #include <endian.h>
 #include <cstdio>
 #include <zlib.h>
+#include <string>
+#include <fstream>
 
 #include "sognoHeader.hpp"
 
 static const uint32_t HEADER_MAGIC_NUMBER = 0x25ffa4ff;
-static const size_t HEADER_LEN = 0x20;
+static const ssize_t HEADER_LEN = 0x20;
 
-SognoPartitionExtractor::SognoPartitionExtractor(unsigned char* rawFileBuffer, size_t fileSize) :
+SognoPartitionExtractor::SognoPartitionExtractor(unsigned char* rawFileBuffer, ssize_t fileSize) :
 	mIsValid(false),
 	mFileSize(fileSize),
 	mRawFileBuffer(rawFileBuffer),
@@ -22,16 +24,17 @@ SognoPartitionExtractor::SognoPartitionExtractor(unsigned char* rawFileBuffer, s
 			size_t offset = mMainHeader.offset();
 			do
 			{
-				currPartition = new SognoPartition(rawFileBuffer+offset, fileSize);
+				currPartition = new SognoPartition(rawFileBuffer + offset + 4/*block length*/, mFileSize-offset);
 				if (*currPartition)
 				{
-					offset = currPartition->nextPartitionOffset();
+					offset += currPartition->nextPartitionOffset() + 4;
 					mPartition.push_back(currPartition);
 				}
 			} while (*currPartition);
 
 			if (mPartition.size() > 0)
 			{
+				printf("Found %lu partitions\n", mPartition.size());
 				mIsValid = true;
 			}
 		}
@@ -40,7 +43,7 @@ SognoPartitionExtractor::SognoPartitionExtractor(unsigned char* rawFileBuffer, s
 
 SognoPartitionExtractor::~SognoPartitionExtractor()
 {
-	for(auto currPartition : mPartition)
+	for (auto currPartition : mPartition)
 	{
 		delete currPartition;
 	}
@@ -51,22 +54,38 @@ SognoPartitionExtractor::operator bool() const
 	return mIsValid;
 }
 
-SognoPartition::SognoPartition(unsigned char* rawFileBuffer, size_t fileSize) :
+bool SognoPartitionExtractor::writePartitions(const std::string& prefix) const
+{
+	size_t counter = 0;
+	for (auto currPartition : mPartition)
+	{
+		if (!currPartition->writeData(prefix, counter++))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+SognoPartition::SognoPartition(unsigned char* rawFileBuffer, ssize_t fileSize) :
 	mIsValid(false),
 	mHeader(rawFileBuffer),
 	mRawPartition(rawFileBuffer),
 	mRawPartitionPayload(nullptr),
 	mNextPartitionOffset(0)
 {
-	if (mHeader)
+	if (fileSize > HEADER_LEN)
 	{
-		mRawPartitionPayload = mRawPartition + mHeader.offset();
-		mNextPartitionOffset = mHeader.offset() + mHeader.dataSize() + HEADER_LEN + 4;
-		mIsValid = true;
-	}
-	else
-	{
-		printf("%s: error while extracting partition\n", __PRETTY_FUNCTION__);
+		if (mHeader)
+		{
+			mRawPartitionPayload = mRawPartition + mHeader.offset();
+			mNextPartitionOffset = mHeader.offset() + mHeader.dataSize();
+			mIsValid = true;
+		}
+		else
+		{
+			printf("%s: error while extracting partition\n", __PRETTY_FUNCTION__);
+		}
 	}
 }
 
@@ -84,6 +103,23 @@ uint32_t SognoPartition::nextPartitionOffset() const
 	return mNextPartitionOffset;
 }
 
+bool SognoPartition::writeData(const std::string& prefix, size_t postfix) const
+{
+	std::fstream partitionFile;
+	std::string filename = prefix + std::to_string(postfix) + ".img";
+	partitionFile.open(filename.c_str(), std::fstream::out);
+	if (!partitionFile.is_open())
+	{
+		printf("could not open image file!\n");
+		return false;
+	}
+
+	partitionFile.write(reinterpret_cast<char*>(mRawPartitionPayload), mHeader.dataSize());
+
+	partitionFile.close();
+	return true;
+}
+
 SognoHeader::SognoHeader(unsigned char* rawFileBuffer) :
 	mIsValid(false),
 	mVersion(0),
@@ -92,8 +128,7 @@ SognoHeader::SognoHeader(unsigned char* rawFileBuffer) :
 	mRomAddr(0),
 	mDataSize(0),
 	mCrc32(0),
-	mOffset(0),
-	mBlockLen(0)
+	mOffset(0)
 {
 	uint32_t magicNumber;
 	memcpy(&magicNumber, rawFileBuffer, 4);
@@ -124,7 +159,6 @@ SognoHeader::SognoHeader(unsigned char* rawFileBuffer) :
 				{
 					mDataSize = 0;
 				}
-				memcpy(&mBlockLen, rawFileBuffer+pos+mDataSize, 4); pos += 4; // this value is big endian!!
 
 				mVersion = le32toh(mVersion);
 				mSystemId = le32toh(mSystemId);
@@ -132,7 +166,6 @@ SognoHeader::SognoHeader(unsigned char* rawFileBuffer) :
 				mRomAddr = le32toh(mRomAddr);
 				mDataSize = le32toh(mDataSize);
 				mCrc32 = le32toh(mCrc32);
-				mBlockLen = be32toh(mBlockLen) + HEADER_LEN; // BIG ENDIAN!!
 				mOffset = pos; // end of the header!
 
 				// that's not realy proper, but easier than doing it with cout:
@@ -144,7 +177,6 @@ SognoHeader::SognoHeader(unsigned char* rawFileBuffer) :
 				printf("payload len: 0x%08X -> %i bytes\n", mDataSize, mDataSize);
 				printf("crc32:       0x%08X\n", mCrc32);
 				printf("calcCrc32:   0x%08X\n", calcCrc32);
-				printf("NextBlockLen:0x%08X\n", mBlockLen);
 				printf("====================\n");
 
 				mIsValid = true;
@@ -161,7 +193,7 @@ SognoHeader::SognoHeader(unsigned char* rawFileBuffer) :
 	}
 	else
 	{
-		printf("BAD MAGIC NUMBER: 0x%08X\n", magicNumber);
+		printf("invalid magic number: %08X\n", magicNumber);
 	}
 }
 
